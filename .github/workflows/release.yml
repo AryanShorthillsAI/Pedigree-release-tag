@@ -20,7 +20,9 @@ jobs:
         run: chmod +x fetchRebaseVersion.sh
 
       - name: Run release check script
-        run: ./fetchRebaseVersion.sh
+        run: |
+          ./fetchRebaseVersion.sh 
+          cat R1.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 
