@@ -16,16 +16,6 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Commit and push changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add R*.txt
-          git diff --quiet --exit-code || git commit -m "Automated: Update R*.txt with latest release tags"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-      
       - name: Make script executable
         run: chmod +x fetchRebaseVersion.sh
 
@@ -33,4 +23,6 @@ jobs:
         run: ./fetchRebaseVersion.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      
 
