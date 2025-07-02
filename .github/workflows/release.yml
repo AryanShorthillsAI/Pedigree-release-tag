@@ -1,0 +1,39 @@
+name: Check GitHub Releases
+
+on:
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  check_and_update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # This token is used to push changes back to the repository
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Make script executable
+        run: chmod +x check_release2.sh
+
+      - name: Run release check script
+        run: ./check_release2.sh
+        env:
+          # Pass the GitHub PAT as an environment variable to the script
+          # The script expects GITHUB_TOKEN to be set if it's using it internally
+          # If your script hardcodes the token, you'll need to modify it to use this env var
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add R*.txt
+          git diff --quiet --exit-code || git commit -m "Automated: Update R*.txt with latest release tags"
+          git push
+        env:
+          # Ensure the GITHUB_TOKEN is available for git push
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
