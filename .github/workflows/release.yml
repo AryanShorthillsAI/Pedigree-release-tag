@@ -17,14 +17,29 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Make script executable
-        run: chmod +x fetchRebaseVersion.sh
+        run: |
+         chmod +x fetchRebaseVersion.sh
+         chmod +x S3push.sh
 
       - name: Run release check script
         run: |
           ./fetchRebaseVersion.sh 
-          cat R1.txt
+          cat version.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+            aws-region: us-east-1
+
+      - name: Push release file to S3
+        run: |
+          ./S3push.sh 
+          echo "Release file pushed to S3 successfully."
+      
 
       
 

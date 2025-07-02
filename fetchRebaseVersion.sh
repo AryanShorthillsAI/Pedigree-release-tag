@@ -48,37 +48,5 @@ for repo in "${REPOS[@]}"; do
     latest_tags_output+="$repo: $tag\n"
 done
 
-# Find the latest existing tag file (R1.txt, R2.txt, etc.)
-latest_file=$(ls -v R*.txt 2>/dev/null | tail -n 1)
-
-# If no tag file exists, create R1.txt
-if [ -z "$latest_file" ]; then
-    echo "No existing tag file found. Creating R1.txt..."
-    printf "$latest_tags_output" > R1.txt
-    echo "R1.txt created with the latest tags."
-    exit 0
-fi
-
-# Compare with the latest existing file
-echo "Comparing with latest file: $latest_file"
-
-# Write current latest tags to a temporary file for robust comparison
-temp_file=$(mktemp)
-printf "%b" "$latest_tags_output" > "$temp_file"
-
-# Compare using diff -q
-if diff -q "$temp_file" "$latest_file" >/dev/null; then
-    echo "No new tags found. Everything is up-to-date."
-    rm "$temp_file" # Clean up temporary file
-    exit 0
-else
-    echo "New tags found. Creating a new tag file."
-    # Determine the next file number
-    file_number=$(echo "$latest_file" | sed -e 's/R//' -e 's/.txt//')
-    next_file_number=$((file_number + 1))
-    new_file="R${next_file_number}.txt"
-
-    printf "%b" "$latest_tags_output" > "$new_file"
-    echo "$new_file created with the new tags."
-    rm "$temp_file" # Clean up temporary file
-fi
+echo "Copying Content in version.txt"
+printf "$latest_tags_output" > version.txt
