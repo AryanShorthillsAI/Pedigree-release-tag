@@ -10,30 +10,82 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # This token is used to push changes back to the repository
           token: ${{ secrets.GH_PAT }}
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Make script executable
-        run: chmod +x check_release2.sh
-
-      - name: Run release check script
-        run: ./check_release2.sh
+      - name: Fetch and Compare Release Tags
+        id: release_check
         env:
-          # Pass the GitHub PAT as an environment variable to the script
-          # The script expects GITHUB_TOKEN to be set if it's using it internally
-          # If your script hardcodes the token, you'll need to modify it to use this env var
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }} # Pass PAT as env var
+        run: |
+          REPOS=(
+              "PedigreeAll/Pedigree-Vision-BE"
+              "PedigreeAll/PedigreeVisionUI"
+          )
+
+          latest_tags_output=""
+          for repo in "${REPOS[@]}"; do
+              echo "Fetching tags for $repo..."
+              all_tags=$(curl -s -H "Authorization: token $GH_PAT" "https://api.github.com/repos/$repo/tags" | jq -r '.[].name')
+
+              latest_tag=""
+              if [[ -n "$all_tags" ]]; then
+                  latest_tag=$(echo "$all_tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+              fi
+
+              if [[ -z "$latest_tag" ]]; then
+                  echo "No vX.Y.Z tags found for $repo" >&2
+                  echo "::error::No vX.Y.Z tags found for $repo"
+                  exit 1
+              else
+                  echo "Latest tag for $repo: $latest_tag"
+                  latest_tags_output+="$repo: $latest_tag\n"
+              fi
+          done
+
+          echo "--- Fetched Latest Tags ---"
+          echo -e "$latest_tags_output"
+
+          # Find the latest existing tag file (R1.txt, R2.txt, etc.)
+          latest_file=$(ls -v R*.txt 2>/dev/null | tail -n 1)
+
+          changes_made="false"
+
+          if [ -z "$latest_file" ]; then
+              echo "No existing tag file found. Creating R1.txt..."
+              echo -e "$latest_tags_output" > R1.txt
+              echo "R1.txt created with the latest tags."
+              changes_made="true"
+          else
+              echo "Comparing with latest file: $latest_file"
+              temp_file=$(mktemp)
+              echo -e "$latest_tags_output" > "$temp_file"
+
+              if diff -q "$temp_file" "$latest_file" >/dev/null; then
+                  echo "No new tags found. Everything is up-to-date."
+              else
+                  echo "New tags found. Creating a new tag file."
+                  file_number=$(echo "$latest_file" | sed -e 's/R//' -e 's/.txt//')
+                  next_file_number=$((file_number + 1))
+                  new_file="R${next_file_number}.txt"
+
+                  echo -e "$latest_tags_output" > "$new_file"
+                  echo "$new_file created with the new tags."
+                  changes_made="true"
+              fi
+              rm "$temp_file" # Clean up temporary file
+          fi
+          echo "changes_made=$changes_made" >> $GITHUB_OUTPUT
 
       - name: Commit and push changes
+        if: steps.release_check.outputs.changes_made == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add R*.txt
-          git diff --quiet --exit-code || git commit -m "Automated: Update R*.txt with latest release tags"
+          git commit -m "Automated: Update R*.txt with latest release tags"
           git push
         env:
-          # Ensure the GITHUB_TOKEN is available for git push
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
