@@ -1,0 +1,3 @@
+PedigreeAll/Pedigree-Vision-BE: v1.0.11
+PedigreeAll/PedigreeVisionUI: v1.0.12
+
