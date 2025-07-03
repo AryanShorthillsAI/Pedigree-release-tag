@@ -1,52 +1,69 @@
 #!/bin/bash
-
+ 
 # --- Configuration ---
 # List of repositories to check
 REPOS=(
     "PedigreeAll/Pedigree-Vision-BE"
     "PedigreeAll/PedigreeVisionUI"
+    "PedigreeAll/DigitreeModels"
 )
-
+ 
 # --- Script Logic ---
-
-# Check if gh CLI is installed
-if ! command -v gh &> /dev/null
-then
-    echo "gh CLI could not be found. Please install it: https://cli.github.com/"
-    exit 1
-fi
-
-# Function to fetch the latest tag for a repo
-get_latest_tag() {
+ 
+# Function to fetch the latest release info and construct asset URLs
+get_latest_release_info() {
     local repo=$1
-    local latest_tag=""
-
-    # Fetch all tags and filter for vX.Y.Z format, then sort and get the latest
-    local all_tags
-    all_tags=$(gh api repos/"$repo"/tags --jq '.[].name' 2>/dev/null)
-
-    if [[ -n "$all_tags" ]]; then
-        latest_tag=$(echo "$all_tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-    fi
-
-    if [[ -z "$latest_tag" ]]; then
-        echo "No vX.Y.Z tags found for $repo" >&2
+ 
+    # IMPORTANT: Use a GITHUB_TOKEN environment variable for security
+    local GITHUB_TOKEN="${GITHUB_TOKEN}"
+ 
+    # Check if curl and jq are installed
+    if ! command -v curl &> /dev/null; then echo "Error: curl is not installed." >&2; echo "ERROR"; return; fi
+    if ! command -v jq &> /dev/null; then echo "Error: jq is not installed." >&2; echo "ERROR"; return; fi
+ 
+    # Fetch the latest release information
+    local release_json
+    release_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/releases/latest")
+ 
+    # Check for API errors
+    if echo "$release_json" | jq -e '.message' > /dev/null; then
+        echo "Error fetching release for $repo: $(echo $release_json | jq -r .message)" >&2
         echo "ERROR"
-    else
-        echo "$latest_tag"
+        return
     fi
+ 
+    # Extract release name and tag name
+    local release_name
+    release_name=$(echo "$release_json" | jq -r '.name')
+    local tag_name
+    tag_name=$(echo "$release_json" | jq -r '.tag_name')
+ 
+    if [[ -z "$release_name" ]]; then echo "No release name found for $repo" >&2; echo "ERROR"; return; fi
+    if [[ -z "$tag_name" ]]; then echo "No tag name found for $repo" >&2; echo "ERROR"; return; fi
+ 
+    # Construct the asset URLs based on the tag
+    local zip_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.zip"
+    local tar_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.tar.gz"
+ 
+    # Format the output
+    local formatted_assets=""
+    formatted_assets+="\n      - ${zip_url}"
+    formatted_assets+="\n      - ${tar_url}"
+ 
+    echo -e "tag: $tag_name, release: $release_name, assets:$formatted_assets"
 }
-
-# Fetch latest tags for all repos
-echo "Fetching latest tags..."
-latest_tags_output=""
+ 
+# --- Main Script ---
+ 
+echo "Fetching latest release information..."
+latest_output=""
 for repo in "${REPOS[@]}"; do
-    tag=$(get_latest_tag "$repo")
-    if [[ "$tag" == "ERROR" ]]; then
+    info=$(get_latest_release_info "$repo")
+    if [[ "$info" == "ERROR" ]]; then
         exit 1
     fi
-    latest_tags_output+="$repo: $tag\n"
+    latest_output+="$repo:\n  $info\n"
 done
-
+ 
 echo "Copying Content in version.txt"
-printf "$latest_tags_output" > version.txt
+printf "$latest_output" > version.txt

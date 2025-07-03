@@ -20,13 +20,6 @@ jobs:
         run: |
          chmod +x fetchRebaseVersion.sh
          chmod +x S3push.sh
-
-      - name: Run release check script
-        run: |
-          ./fetchRebaseVersion.sh 
-          cat version.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -34,6 +27,13 @@ jobs:
             aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
             aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
             aws-region: us-east-1
+
+      - name: Run release check script
+        run: |
+          ./fetchRebaseVersion.sh 
+          cat version.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Push release file to S3
         run: |
