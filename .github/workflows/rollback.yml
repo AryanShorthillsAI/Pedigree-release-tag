@@ -2,6 +2,12 @@ name: Fetch Previous Release from S3
 
 on:
   workflow_dispatch:
+    inputs:
+      release_index:
+        description: 'Index of the release file to fetch :'
+        required: false
+        type: number
+        default: -1
 
 jobs:
   fetch_release:
@@ -33,6 +39,9 @@ jobs:
           fi
 
           PREV_INDEX=$((COUNT - 1))
+          if [ "${{ github.event.inputs.release_index }}" != -1 ]; then
+            PREV_INDEX=${{ github.event.inputs.release_index }}
+          fi
           FILE_NAME="release_${PREV_INDEX}.txt"
           echo "Fetching $FILE_NAME"
 
