@@ -1,0 +1,50 @@
+name: Fetch Previous Release from S3
+ 
+on:
+  workflow_dispatch:
+ 
+jobs:
+  fetch_release:
+    runs-on: ubuntu-latest
+ 
+    env:
+      BUCKET_NAME: myawsbucket9660551704
+      AWS_REGION: ap-south-1
+ 
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ap-south-1
+ 
+      - name: Count files and calculate previous release index
+        id: count
+        run: |
+          echo "Fetching list of release_*.txt files..."
+          OBJECTS=$(aws s3 ls s3://$BUCKET_NAME/ | grep 'release_' | awk '{print $4}')
+          COUNT=$(echo "$OBJECTS" | wc -l)
+          echo "Total release files found: $COUNT"
+ 
+          if [ "$COUNT" -lt 2 ]; then
+            echo "Not enough release files to fetch release_$((COUNT-1)).txt"
+            exit 1
+          fi
+ 
+          PREV_INDEX=$((COUNT - 1))
+          FILE_NAME="release_${PREV_INDEX}.txt"
+          echo "Fetching $FILE_NAME"
+ 
+          echo "COUNT=$COUNT" >> $GITHUB_ENV
+          echo "PREV_FILE=$FILE_NAME" >> $GITHUB_ENV
+ 
+      - name: Download file from S3
+        run: |
+          aws s3 cp s3://$BUCKET_NAME/$PREV_FILE .
+ 
+      - name: Upload release file as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: previous-release-file
+          path: ${{ env.PREV_FILE }}
