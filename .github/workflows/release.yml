@@ -4,131 +4,27 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  check_and_update:
+  check_and_upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-      - name: Fetch and Compare Release Info
-        id: release_check
+      - name: Install Python dependencies
+        run: pip install requests packaging
+
+      - name: Run Release Check Script
+        id: run_python_script
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }} # Use the token from secrets
-        run: |
-          REPOS=(
-              "PedigreeAll/Pedigree-Vision-BE"
-              "PedigreeAll/PedigreeVisionUI"
-              "PedigreeAll/DigitreeModels"
-          )
-
-          # This is the robust logic from the final check_release2.sh script
-          # It has been placed directly into the workflow
-          get_details_for_tag() {
-              local repo=$1
-              local tag=$2
-              local github_token=$3
-              local details=""
-
-              local ref_json=$(curl -s -H "Authorization: token $github_token" "https://api.github.com/repos/$repo/git/ref/tags/$tag")
-              local object_type=$(echo "$ref_json" | jq -r '.object.type')
-              local object_sha=$(echo "$ref_json" | jq -r '.object.sha')
-              local commit_sha=""
-
-              if [[ "$object_type" == "commit" ]]; then
-                  commit_sha=$object_sha
-              elif [[ "$object_type" == "tag" ]]; then
-                  local tag_json=$(curl -s -H "Authorization: token $github_token" "https://api.github.com/repos/$repo/git/tags/$object_sha")
-                  commit_sha=$(echo "$tag_json" | jq -r '.object.sha')
-              fi
-
-              if [[ -z "$commit_sha" || "$commit_sha" == "null" ]]; then
-                  details+="  Commit: Could not resolve commit SHA\n"
-              else
-                  details+="  Commit: $commit_sha\n"
-              fi
-
-              local zip_url="https://github.com/${repo}/archive/refs/tags/${tag}.zip"
-              local tar_url="https://github.com/${repo}/archive/refs/tags/${tag}.tar.gz"
-              details+="  Assets:\n"
-              details+="    - $zip_url\n"
-              details+="    - $tar_url\n"
-              echo -e "$details"
-          }
-
-          latest_output=""
-          for repo in "${REPOS[@]}"; do
-              echo "Processing $repo..."
-              all_tags=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/tags" | jq -r '.[].name')
-              latest_version_tag=$(echo "$all_tags" | \
-                  grep -E '^v?\.?[0-9]+\.[0-9]+\.[0-9]+$' | \
-                  sed -E 's/^(v\.?|v)?(.*)$/\2 \1\2/' | \
-                  sort -V -k1,1 | \
-                  tail -n 1 | \
-                  cut -d' ' -f2-)
-
-              release_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/releases/latest")
-              latest_release_name=$(echo "$release_json" | jq -r '.name')
-              latest_release_tag=$(echo "$release_json" | jq -r '.tag_name')
-
-              latest_output+="==================================================\n"
-              latest_output+="Repository: $repo\n"
-              latest_output+="--------------------------------------------------\n"
-              latest_output+="Latest Tag (by version number)\n"
-              if [[ -n "$latest_version_tag" ]]; then
-                  latest_output+="  Tag:    $latest_version_tag\n"
-                  tag_details=$(get_details_for_tag "$repo" "$latest_version_tag" "$GITHUB_TOKEN")
-                  latest_output+="$tag_details"
-              else
-                  latest_output+="  No valid semantic version tag found.\n"
-              fi
-
-              latest_output+="--------------------------------------------------\n"
-              latest_output+="Latest Release (by date)\n"
-              if [[ "$latest_release_name" != "null" && -n "$latest_release_name" ]]; then
-                  latest_output+="  Release: ${latest_release_name#Release }\n"
-                  latest_output+="  Tag:     $latest_release_tag\n"
-                  release_details=$(get_details_for_tag "$repo" "$latest_release_tag" "$GITHUB_TOKEN")
-                  latest_output+="$release_details"
-              else
-                  latest_output+="  No release found.\n"
-              fi
-              latest_output+="==================================================\n\n"
-          done
-
-          echo "--- Fetched Latest Info ---"
-          echo -e "$latest_output"
-
-          latest_file=$(ls -v R*.txt 2>/dev/null | tail -n 1)
-          changes_made="false"
-
-          if [ -z "$latest_file" ]; then
-              echo "No existing release file found. Creating R1.txt..."
-              echo -e "$latest_output" > R1.txt
-              changes_made="true"
-          else
-              echo "Comparing with latest file: $latest_file"
-              temp_file=$(mktemp)
-              echo -e "$latest_output" > "$temp_file"
-
-              if diff -q "$temp_file" "$latest_file" >/dev/null; then
-                  echo "No new information found."
-              else
-                  echo "New release information found. Creating new file."
-                  file_number=$(echo "$latest_file" | sed -e 's/R//' -e 's/.txt//')
-                  next_file_number=$((file_number + 1))
-                  new_file="R${next_file_number}.txt"
-                  echo -e "$latest_output" > "$new_file"
-                  changes_made="true"
-              fi
-              rm "$temp_file"
-          fi
-          echo "changes_made=$changes_made" >> $GITHUB_OUTPUT
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: python check_releases.py
 
       - name: Configure AWS Credentials
-        if: steps.release_check.outputs.changes_made == 'true'
         uses: aws-actions/configure-aws-credentials@v2
         with:
             aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
@@ -136,27 +32,41 @@ jobs:
             aws-region: ap-south-1
 
       - name: Upload Release File to S3
-        if: steps.release_check.outputs.changes_made == 'true'
         run: |
           BUCKET_NAME="myawsbucket9660551704"
           AWS_REGION="ap-south-1"
+          LOCAL_REPORT_FILE="latest_report.md"
 
-          # Find the newest R*.txt file that was just created
-          LATEST_R_FILE=$(ls -v R*.txt | tail -n 1)
+          # Get the list of existing release files in S3
+          S3_FILES=$(aws s3 ls s3://$BUCKET_NAME/ --region $AWS_REGION | grep -E '^release_[0-9]+\.txt$' | awk '{print $4}' | sort -V)
+          LAST_S3_FILE=$(echo "$S3_FILES" | tail -n 1)
 
-          if [ -z "$LATEST_R_FILE" ]; then
-            echo "::error::Could not find the R*.txt file to upload."
-            exit 1
+          CHANGES_DETECTED="true" # Assume changes until proven otherwise
+
+          if [ -n "$LAST_S3_FILE" ]; then
+              echo "Downloading last uploaded file from S3: $LAST_S3_FILE"
+              aws s3 cp "s3://$BUCKET_NAME/$LAST_S3_FILE" "last_s3_report.md" --region $AWS_REGION
+
+              echo "Comparing local report with last S3 report..."
+              if diff -q "$LOCAL_REPORT_FILE" "last_s3_report.md" >/dev/null; then
+                  echo "No new information found. Everything is up-to-date."
+                  CHANGES_DETECTED="false"
+              else
+                  echo "New information detected. Proceeding with upload."
+              fi
+              rm "last_s3_report.md" # Clean up downloaded file
+          else
+              echo "No previous release files found in S3. Proceeding with initial upload."
           fi
 
-          echo "Found file to upload: $LATEST_R_FILE"
+          if [ "$CHANGES_DETECTED" == "true" ]; then
+              echo "Counting existing .txt files in bucket..."
+              count=$(echo "$S3_FILES" | wc -l) # Use the already fetched list
+              new_version=$((count + 1))
+              new_filename="release_${new_version}.txt"
 
-          echo "Counting existing .txt files in bucket..."
-          count=$(aws s3 ls s3://$BUCKET_NAME/ --region $AWS_REGION | grep -E '\.txt$' | wc -l)
-          new_version=$((count + 1))
-          new_filename="release_${new_version}.txt"
+              echo "Uploading $LOCAL_REPORT_FILE to S3 as $new_filename..."
+              aws s3 cp "$LOCAL_REPORT_FILE" "s3://$BUCKET_NAME/$new_filename" --region $AWS_REGION
 
-          echo "Uploading $LATEST_R_FILE to S3 as $new_filename..."
-          aws s3 cp "$LATEST_R_FILE" "s3://$BUCKET_NAME/$new_filename" --region $AWS_REGION
-
-          echo "Done. Uploaded $new_filename to S3."
+              echo "Done. Uploaded $new_filename to S3."
+          fi
