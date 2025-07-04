@@ -1,0 +1,13 @@
+PedigreeAll/Pedigree-Vision-BE:
+  tag: v1.0.11, release: Release v1.0.11, commit: 3d6f8081ab8f519aea79a27722eff67939c96b34, assets:
+      - https://github.com/PedigreeAll/Pedigree-Vision-BE/archive/refs/tags/v1.0.11.zip
+      - https://github.com/PedigreeAll/Pedigree-Vision-BE/archive/refs/tags/v1.0.11.tar.gz
+PedigreeAll/PedigreeVisionUI:
+  tag: v.1.0.14, release: v.1.0.14, commit: ccc0a019d8fc811325a0e9199ce0af75028e0472, assets:
+      - https://github.com/PedigreeAll/PedigreeVisionUI/archive/refs/tags/v.1.0.14.zip
+      - https://github.com/PedigreeAll/PedigreeVisionUI/archive/refs/tags/v.1.0.14.tar.gz
+PedigreeAll/DigitreeModels:
+  tag: v.1.0.4, release: v.1.0.4, commit: 77b1df7cd46afe446c8381b8481291cf4ad682d1, assets:
+      - https://github.com/PedigreeAll/DigitreeModels/archive/refs/tags/v.1.0.4.zip
+      - https://github.com/PedigreeAll/DigitreeModels/archive/refs/tags/v.1.0.4.tar.gz
+
