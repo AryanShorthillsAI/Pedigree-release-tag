@@ -46,11 +46,30 @@ jobs:
                   exit 1
               fi
 
+              # Get the commit SHA for the release tag. This handles both lightweight and annotated tags.
+              ref_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/git/ref/tags/$tag_name")
+              object_type=$(echo "$ref_json" | jq -r '.object.type')
+              object_sha=$(echo "$ref_json" | jq -r '.object.sha')
+              commit_sha=""
+
+              if [[ "$object_type" == "commit" ]]; then
+                  commit_sha=$object_sha
+              elif [[ "$object_type" == "tag" ]]; then
+                  tag_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/git/tags/$object_sha")
+                  commit_sha=$(echo "$tag_json" | jq -r '.object.sha')
+              fi
+
+              if [[ -z "$commit_sha" || "$commit_sha" == "null" ]]; then
+                  echo "Could not resolve commit SHA for tag $tag_name in $repo" >&2
+                  echo "::error::Could not resolve commit SHA for tag $tag_name in $repo"
+                  exit 1
+              fi
+
               zip_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.zip"
               tar_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.tar.gz"
 
               formatted_assets="\n      - ${zip_url}\n      - ${tar_url}"
-              latest_output+="$repo:\n  tag: $tag_name, release: $release_name, assets:$formatted_assets\n"
+              latest_output+="$repo:\n  tag: $tag_name, release: $release_name, commit: $commit_sha, assets:$formatted_assets\n"
           done
 
           echo "--- Fetched Latest Release Info ---"
