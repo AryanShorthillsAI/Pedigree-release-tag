@@ -28,10 +28,8 @@ def get_commit_sha_for_tag(repo, tag_name, github_token):
             tag_data = get_github_data(f"{GITHUB_API_BASE}{repo}/git/tags/{object_sha}", github_token)
             return tag_data['object']['sha']
     except requests.exceptions.RequestException as e:
-        print(f"DEBUG: Error fetching commit SHA for tag {tag_name} in {repo}: {e}")
         return "Could not resolve commit SHA"
     except KeyError:
-        print(f"DEBUG: KeyError fetching commit SHA for tag {tag_name} in {repo}")
         return "Could not resolve commit SHA"
     return "Could not resolve commit SHA"
 
@@ -77,7 +75,6 @@ def main():
         try:
             # --- Get Latest Tag (by version) ---
             tags_data = get_github_data(f"{GITHUB_API_BASE}{repo}/tags", github_token)
-            print(f"DEBUG: Raw tags for {repo}: {[t['name'] for t in tags_data]}")
             valid_tags = []
             for tag in tags_data:
                 try:
@@ -85,16 +82,11 @@ def main():
                     normalized_tag = tag['name'].lstrip('v').lstrip('.')
                     parsed_version = parse_version(normalized_tag)
                     valid_tags.append((parsed_version, tag['name'])) # Store original tag name
-                    print(f"DEBUG: Tag '{tag['name']}' -> Normalized: '{normalized_tag}' -> Parsed: {parsed_version}")
                 except Exception as e:
-                    print(f"DEBUG: Skipping invalid tag format '{tag['name']}': {e}")
                     continue
-
-            print(f"DEBUG: Valid tags list for {repo}: {valid_tags}")
 
             if valid_tags:
                 latest_version_tag_name = sorted(valid_tags, key=lambda x: x[0])[-1][1]
-                print(f"DEBUG: Selected latest version tag for {repo}: {latest_version_tag_name}")
                 commit_sha = get_commit_sha_for_tag(repo, latest_version_tag_name, github_token)
                 latest_version_tag_info = {
                     "tag": latest_version_tag_name,
