@@ -40,13 +40,16 @@ jobs:
               release_name=$(echo "$release_json" | jq -r '.name')
               tag_name=$(echo "$release_json" | jq -r '.tag_name')
 
+              # Standardize the release name
+              release_name=${release_name#Release }
+
               if [[ -z "$release_name" ]] || [[ -z "$tag_name" ]]; then
                   echo "Could not extract release or tag name for $repo" >&2
                   echo "::error::Could not extract release or tag name for $repo"
                   exit 1
               fi
 
-              # Get the commit SHA for the release tag. This handles both lightweight and annotated tags.
+              # Get the commit SHA for the release tag
               ref_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$repo/git/ref/tags/$tag_name")
               object_type=$(echo "$ref_json" | jq -r '.object.type')
               object_sha=$(echo "$ref_json" | jq -r '.object.sha')
@@ -65,11 +68,19 @@ jobs:
                   exit 1
               fi
 
+              # Construct the asset URLs based on the tag
               zip_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.zip"
               tar_url="https://github.com/${repo}/archive/refs/tags/${tag_name}.tar.gz"
 
-              formatted_assets="\n      - ${zip_url}\n      - ${tar_url}"
-              latest_output+="$repo:\n  tag: $tag_name, release: $release_name, commit: $commit_sha, assets:$formatted_assets\n"
+              # Format the output for readability
+              latest_output+="Repository: $repo\n"
+              latest_output+="Release: $release_name\n"
+              latest_output+="Tag: $tag_name\n"
+              latest_output+="Commit: $commit_sha\n"
+              latest_output+="Assets:\n"
+              latest_output+="  - $zip_url\n"
+              latest_output+="  - $tar_url\n"
+              latest_output+="--------------------------------------------------\n"
           done
 
           echo "--- Fetched Latest Release Info ---"
