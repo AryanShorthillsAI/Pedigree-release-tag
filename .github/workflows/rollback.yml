@@ -56,7 +56,9 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
+          # Pass the PAT as an environment variable to the remote script
           script: |
+            export GH_PAT='${{ secrets.GH_PAT }}'
             RELEASE_FILE_ON_SERVER="/tmp/${{ steps.download_file.outputs.release_file }}"
             echo "Executing rollback script on server..."
             bash ~/rollback.sh ${RELEASE_FILE_ON_SERVER}
