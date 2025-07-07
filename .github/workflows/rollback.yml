@@ -1,59 +1,71 @@
-name: Fetch Previous Release from S3
+name: EC2 Rollback from S3 Release
 
+# This workflow is triggered manually from the GitHub Actions UI
 on:
   workflow_dispatch:
     inputs:
-      release_index:
-        description: 'Index of the release file to fetch :'
-        required: false
+      version_number:
+        description: 'The version NUMBER to roll back to (e.g., enter 5 for release_5.txt)'
+        required: true
         type: number
-        default: -1
 
 jobs:
-  fetch_release:
+  rollback_on_ec2:
+    name: Trigger Rollback on EC2 Server
     runs-on: ubuntu-latest
-
-    env:
-      BUCKET_NAME: myawsbucket9660551704
-      AWS_REGION: ap-south-1
-
+    
     steps:
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      - name: Count files and calculate previous release index
-        id: count
+      - name: Download specified release file from S3
+        id: download_file
         run: |
-          echo "Fetching list of release_*.txt files..."
-          OBJECTS=$(aws s3 ls s3://$BUCKET_NAME/ | grep 'release_' | awk '{print $4}')
-          COUNT=$(echo "$OBJECTS" | wc -l)
-          echo "Total release files found: $COUNT"
-
-          if [ "$COUNT" -lt 2 ]; then
-            echo "Not enough release files to fetch release_$((COUNT-1)).txt"
+          VERSION=${{ github.event.inputs.version_number }}
+          BUCKET_NAME="myawsbucket9660551704"
+          FILE_NAME="release_${VERSION}.txt"
+          
+          echo "Attempting to download s3://${BUCKET_NAME}/${FILE_NAME} from S3..."
+          aws s3 cp "s3://${BUCKET_NAME}/${FILE_NAME}" "./${FILE_NAME}"
+          
+          # This check is crucial. If the download fails, the entire workflow stops.
+          if [ $? -ne 0 ]; then
+            echo "::error::Failed to download ${FILE_NAME} from S3. Please check if the version number is correct and the file exists in the bucket."
             exit 1
           fi
+          
+          echo "Downloaded ${FILE_NAME} successfully."
+          # Set the filename as an output for the next step to use
+          echo "release_file=${FILE_NAME}" >> $GITHUB_OUTPUT
 
-          PREV_INDEX=$((COUNT - 1))
-          if [ "${{ github.event.inputs.release_index }}" != -1 ]; then
-            PREV_INDEX=${{ github.event.inputs.release_index }}
-          fi
-          FILE_NAME="release_${PREV_INDEX}.txt"
-          echo "Fetching $FILE_NAME"
-
-          echo "COUNT=$COUNT" >> $GITHUB_ENV
-          echo "PREV_FILE=$FILE_NAME" >> $GITHUB_ENV
-
-      - name: Download file from S3
-        run: |
-          aws s3 cp s3://$BUCKET_NAME/$PREV_FILE .
-
-      - name: Upload release file as artifact
-        uses: actions/upload-artifact@v4
+      - name: Setup SSH Agent for EC2 Connection
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          name: previous-release-file
-          path: ${{ env.PREV_FILE }}
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+      - name: Transfer file and execute rollback on EC2
+        run: |
+          # Get the filename from the output of the previous step
+          RELEASE_FILE=${{ steps.download_file.outputs.release_file }}
+          
+          # Define where the file will be temporarily stored on the EC2 server
+          EC2_DEST_PATH="/tmp/${RELEASE_FILE}"
+
+          # Add the EC2 host's key to the runner's known_hosts file
+          # This prevents the interactive "Are you sure you want to continue connecting?" prompt.
+          echo "Adding EC2 host to known_hosts..."
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+          echo "Transferring ${RELEASE_FILE} to EC2 at ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${EC2_DEST_PATH}"
+          scp ./${RELEASE_FILE} ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${EC2_DEST_PATH}
+          
+          echo "Executing rollback script on EC2..."
+          # This is the key command that triggers your on-server script
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "bash ~/rollback.sh ${EC2_DEST_PATH}"
+
+      - name: Rollback Triggered
+        run: echo "✅ Rollback command for version ${{ github.event.inputs.version_number }} has been successfully sent to the EC2 server."
