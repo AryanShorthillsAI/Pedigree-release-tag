@@ -1,6 +1,5 @@
-name: EC2 Rollback from S3 Release
+name: EC2 Rollback (Password Auth)
 
-# This workflow is triggered manually from the GitHub Actions UI
 on:
   workflow_dispatch:
     inputs:
@@ -29,43 +28,38 @@ jobs:
           BUCKET_NAME="myawsbucket9660551704"
           FILE_NAME="release_${VERSION}.txt"
           
-          echo "Attempting to download s3://${BUCKET_NAME}/${FILE_NAME} from S3..."
+          echo "Downloading s3://${BUCKET_NAME}/${FILE_NAME}..."
           aws s3 cp "s3://${BUCKET_NAME}/${FILE_NAME}" "./${FILE_NAME}"
           
-          # This check is crucial. If the download fails, the entire workflow stops.
           if [ $? -ne 0 ]; then
-            echo "::error::Failed to download ${FILE_NAME} from S3. Please check if the version number is correct and the file exists in the bucket."
+            echo "::error::Failed to download ${FILE_NAME}. Check if version number is correct."
             exit 1
           fi
           
           echo "Downloaded ${FILE_NAME} successfully."
-          # Set the filename as an output for the next step to use
           echo "release_file=${FILE_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Setup SSH Agent for EC2 Connection
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Copy Release File to EC2 Server
+        uses: appleboy/scp-action@master
         with:
-          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          port: 22
+          source: "./${{ steps.download_file.outputs.release_file }}"
+          target: "/tmp/" # The file will be placed in the /tmp directory
 
-      - name: Transfer file and execute rollback on EC2
-        run: |
-          # Get the filename from the output of the previous step
-          RELEASE_FILE=${{ steps.download_file.outputs.release_file }}
-          
-          # Define where the file will be temporarily stored on the EC2 server
-          EC2_DEST_PATH="/tmp/${RELEASE_FILE}"
-
-          # Add the EC2 host's key to the runner's known_hosts file
-          # This prevents the interactive "Are you sure you want to continue connecting?" prompt.
-          echo "Adding EC2 host to known_hosts..."
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
-
-          echo "Transferring ${RELEASE_FILE} to EC2 at ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${EC2_DEST_PATH}"
-          scp ./${RELEASE_FILE} ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${EC2_DEST_PATH}
-          
-          echo "Executing rollback script on EC2..."
-          # This is the key command that triggers your on-server script
-          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "bash ~/rollback.sh ${EC2_DEST_PATH}"
+      - name: Execute Rollback Script on EC2 Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          port: 22
+          script: |
+            RELEASE_FILE_ON_SERVER="/tmp/${{ steps.download_file.outputs.release_file }}"
+            echo "Executing rollback script on server..."
+            bash ~/rollback.sh ${RELEASE_FILE_ON_SERVER}
 
       - name: Rollback Triggered
         run: echo "✅ Rollback command for version ${{ github.event.inputs.version_number }} has been successfully sent to the EC2 server."
