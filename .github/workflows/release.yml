@@ -21,13 +21,12 @@ jobs:
       - name: Run Release Check Script
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-        # Run the Python script you provided
         run: python check_releases.py
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
             aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
             aws-region: ap-south-1
 
@@ -52,18 +51,13 @@ jobs:
             echo "Processing: ${repo_name}"
             echo "Checking for S3 object: s3://${BUCKET_NAME}/${s3_key_path}"
 
-            # Check if the file exists, but allow the command to "fail" without stopping the script.
-            # We will check the exit code manually in the next line.
-            aws s3api head-object --bucket "$BUCKET_NAME" --key "$s3_key_path" >/dev/null 2>&1 || true
-            
-            # Save the exit code of the AWS command immediately.
-            aws_exit_code=$?
-            
-            # Now, check the saved exit code.
-            if [ $aws_exit_code -ne 0 ]; then
-              echo "Release version not found in S3 (Exit Code: $aws_exit_code). Uploading..."
+            # CORRECTED LOGIC: Use 'if ! command' to test for failure.
+            if ! aws s3api head-object --bucket "$BUCKET_NAME" --key "$s3_key_path" >/dev/null 2>&1; then
+              echo "Release version not found in S3. Uploading..."
+              
               aws s3 cp "$local_json_file" "s3://${BUCKET_NAME}/${s3_key_path}"
               echo "✅ Uploaded ${file_name}"
+              
               aws s3 cp "$local_html_file" "s3://${BUCKET_NAME}/${repo_name}/${html_file_name}"
               echo "✅ Uploaded ${html_file_name}"
             else
