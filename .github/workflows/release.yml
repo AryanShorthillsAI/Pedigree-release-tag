@@ -36,45 +36,37 @@ jobs:
           BUCKET_NAME="myawsbucket9660551704"
           OUTPUT_DIR="output"
 
-          # Exit gracefully if the python script didn't create the output directory
           if [ ! -d "$OUTPUT_DIR" ]; then
             echo "No output directory found. No releases were generated."
             exit 0
           fi
 
-          # Use 'find' to locate all .json files created by the script
           find "$OUTPUT_DIR" -type f -name "*.json" | while read -r local_json_file; do
-            # Extract names from the path e.g., output/PedigreeVisionUI/v_1_0_14.json
-            repo_name=$(basename $(dirname "$local_json_file")) # Extracts "PedigreeVisionUI"
-            file_name=$(basename "$local_json_file")           # Extracts "v_1_0_14.json"
-            
-            # Construct the corresponding HTML filename and the S3 key
+            repo_name=$(basename $(dirname "$local_json_file"))
+            file_name=$(basename "$local_json_file")
             local_html_file="${local_json_file%.json}.html"
             html_file_name=$(basename "$local_html_file")
-            s3_key_path="${repo_name}/${file_name}" # This is the object path in S3, e.g., PedigreeVisionUI/v_1_0_14.json
+            s3_key_path="${repo_name}/${file_name}"
 
             echo "--------------------------------------------------"
             echo "Processing: ${repo_name}"
             echo "Checking for S3 object: s3://${BUCKET_NAME}/${s3_key_path}"
 
-            # Use aws s3api head-object to efficiently check if the file exists.
-            # This command returns a non-zero exit code if the object is not found (404).
-            aws s3api head-object --bucket "$BUCKET_NAME" --key "$s3_key_path" >/dev/null 2>&1
+            # Check if the file exists, but allow the command to "fail" without stopping the script.
+            # We will check the exit code manually in the next line.
+            aws s3api head-object --bucket "$BUCKET_NAME" --key "$s3_key_path" >/dev/null 2>&1 || true
             
-            # Check the exit code of the last command ($?)
-            if [ $? -ne 0 ]; then
-              # If the command failed, the file does not exist in S3.
-              echo "Release version not found in S3. Uploading..."
-              
-              # Upload the JSON file
+            # Save the exit code of the AWS command immediately.
+            aws_exit_code=$?
+            
+            # Now, check the saved exit code.
+            if [ $aws_exit_code -ne 0 ]; then
+              echo "Release version not found in S3 (Exit Code: $aws_exit_code). Uploading..."
               aws s3 cp "$local_json_file" "s3://${BUCKET_NAME}/${s3_key_path}"
               echo "✅ Uploaded ${file_name}"
-              
-              # Upload the HTML file
               aws s3 cp "$local_html_file" "s3://${BUCKET_NAME}/${repo_name}/${html_file_name}"
               echo "✅ Uploaded ${html_file_name}"
             else
-              # If the command succeeded, the file already exists.
               echo "This release version is already present in S3. No action needed."
             fi
           done
