@@ -1,4 +1,4 @@
-name: Check GitHub Releases and Upload to S3
+name: Check Latest GitHub Release and Upload to S3
 
 on:
   workflow_dispatch: # Allows manual triggering
@@ -19,54 +19,64 @@ jobs:
         run: pip install requests packaging
 
       - name: Run Release Check Script
-        id: run_python_script
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        # Run the Python script you provided
         run: python check_releases.py
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
             aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
             aws-region: ap-south-1
 
-      - name: Upload Release File to S3
+      - name: Check S3 and Upload New Release Files
         run: |
           BUCKET_NAME="myawsbucket9660551704"
-          AWS_REGION="ap-south-1"
-          LOCAL_REPORT_FILE="latest_report.md"
+          OUTPUT_DIR="output"
 
-          # Get the list of existing release files in S3
-          S3_FILES=$(aws s3 ls s3://$BUCKET_NAME/ --region $AWS_REGION | grep -E '^release_[0-9]+\.txt$' | awk '{print $4}' | sort -V)
-          LAST_S3_FILE=$(echo "$S3_FILES" | tail -n 1)
-
-          CHANGES_DETECTED="true" # Assume changes until proven otherwise
-
-          if [ -n "$LAST_S3_FILE" ]; then
-              echo "Downloading last uploaded file from S3: $LAST_S3_FILE"
-              aws s3 cp "s3://$BUCKET_NAME/$LAST_S3_FILE" "last_s3_report.md" --region $AWS_REGION
-
-              echo "Comparing local report with last S3 report..."
-              if diff -q "$LOCAL_REPORT_FILE" "last_s3_report.md" >/dev/null; then
-                  echo "No new information found. Everything is up-to-date."
-                  CHANGES_DETECTED="false"
-              else
-                  echo "New information detected. Proceeding with upload."
-              fi
-              rm "last_s3_report.md" # Clean up downloaded file
-          else
-              echo "No previous release files found in S3. Proceeding with initial upload."
+          # Exit gracefully if the python script didn't create the output directory
+          if [ ! -d "$OUTPUT_DIR" ]; then
+            echo "No output directory found. No releases were generated."
+            exit 0
           fi
 
-          if [ "$CHANGES_DETECTED" == "true" ]; then
-              echo "Counting existing .txt files in bucket..."
-              count=$(echo "$S3_FILES" | wc -l) # Use the already fetched list
-              new_version=$((count + 1))
-              new_filename="release_${new_version}.txt"
+          # Use 'find' to locate all .json files created by the script
+          find "$OUTPUT_DIR" -type f -name "*.json" | while read -r local_json_file; do
+            # Extract names from the path e.g., output/PedigreeVisionUI/v_1_0_14.json
+            repo_name=$(basename $(dirname "$local_json_file")) # Extracts "PedigreeVisionUI"
+            file_name=$(basename "$local_json_file")           # Extracts "v_1_0_14.json"
+            
+            # Construct the corresponding HTML filename and the S3 key
+            local_html_file="${local_json_file%.json}.html"
+            html_file_name=$(basename "$local_html_file")
+            s3_key_path="${repo_name}/${file_name}" # This is the object path in S3, e.g., PedigreeVisionUI/v_1_0_14.json
 
-              echo "Uploading $LOCAL_REPORT_FILE to S3 as $new_filename..."
-              aws s3 cp "$LOCAL_REPORT_FILE" "s3://$BUCKET_NAME/$new_filename" --region $AWS_REGION
+            echo "--------------------------------------------------"
+            echo "Processing: ${repo_name}"
+            echo "Checking for S3 object: s3://${BUCKET_NAME}/${s3_key_path}"
 
-              echo "Done. Uploaded $new_filename to S3."
-          fi
+            # Use aws s3api head-object to efficiently check if the file exists.
+            # This command returns a non-zero exit code if the object is not found (404).
+            aws s3api head-object --bucket "$BUCKET_NAME" --key "$s3_key_path" >/dev/null 2>&1
+            
+            # Check the exit code of the last command ($?)
+            if [ $? -ne 0 ]; then
+              # If the command failed, the file does not exist in S3.
+              echo "Release version not found in S3. Uploading..."
+              
+              # Upload the JSON file
+              aws s3 cp "$local_json_file" "s3://${BUCKET_NAME}/${s3_key_path}"
+              echo "✅ Uploaded ${file_name}"
+              
+              # Upload the HTML file
+              aws s3 cp "$local_html_file" "s3://${BUCKET_NAME}/${repo_name}/${html_file_name}"
+              echo "✅ Uploaded ${html_file_name}"
+            else
+              # If the command succeeded, the file already exists.
+              echo "This release version is already present in S3. No action needed."
+            fi
+          done
+          echo "--------------------------------------------------"
+          echo "S3 release check complete."
