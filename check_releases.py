@@ -58,7 +58,13 @@ def main():
                     "tag_name": release_tag,
                     "commit_sha": commit_sha,
                     "published_at": release_data.get('published_at'),
-                    "release_notes": release_data.get('body')
+                    "release_notes": release_data.get('body'),
+                    # --- ADDITION 1: ADD ASSETS DICTIONARY ---
+                    # Using the release_tag as requested
+                    "assets": {
+                        "zip_url": f"https://github.com/{repo}/archive/refs/tags/{release_tag}.zip",
+                        "tar_url": f"https://github.com/{repo}/archive/refs/tags/{release_tag}.tar.gz"
+                    }
                 }
                 print(f"  Latest Release: '{latest_release_info['release_name']}' (Commit: {commit_sha})")
             else:
@@ -107,14 +113,15 @@ def main():
                 json.dump(combined_data, f, indent=4)
             print(f"  Generated: {json_filepath}")
 
-            # Write HTML
+            # --- ADDITION 2: ADD ASSETS TO HTML OUTPUT ---
+            # Generate HTML
             html_content = f"""
             <!DOCTYPE html><html lang="en">
             <head><title>Latest Info for {repo}</title><style>body{{font-family:sans-serif;margin:40px;}}h2{{border-bottom:1px solid #ccc;}}code{{background:#f4f4f4;padding:2px 6px;}}</style></head>
             <body>
                 <h1>Status Report for <code>{repo}</code></h1>
                 <h2>Latest Formal Release</h2>
-                {'<ul>' + '<li><strong>Release Name:</strong> <code>' + latest_release_info.get('release_name', 'N/A') + '</code></li>' + '<li><strong>Tag:</strong> <code>' + latest_release_info.get('tag_name', 'N/A') + '</code></li>' + '<li><strong>Commit SHA:</strong> <code>' + latest_release_info.get('commit_sha', 'N/A') + '</code></li>' + '</ul>' if latest_release_info else '<p>No formal release found.</p>'}
+                {'<ul>' + '<li><strong>Release Name:</strong> <code>' + latest_release_info.get('release_name', 'N/A') + '</code></li>' + '<li><strong>Tag:</strong> <code>' + latest_release_info.get('tag_name', 'N/A') + '</code></li>' + '<li><strong>Commit SHA:</strong> <code>' + latest_release_info.get('commit_sha', 'N/A') + '</code></li>' + '</ul>' + '<h3>Assets</h3>' + '<ul>' + '<li><a href="' + latest_release_info.get('assets', {}).get('zip_url', '#') + '">Download (zip)</a></li>' + '<li><a href="' + latest_release_info.get('assets', {}).get('tar_url', '#') + '">Download (tar.gz)</a></li>' + '</ul>' if latest_release_info else '<p>No formal release found.</p>'}
                 
                 <h2>Latest Tag by Version</h2>
                 {'<ul>' + '<li><strong>Tag:</strong> <code>' + latest_tag_info.get('tag_name', 'N/A') + '</code></li>' + '<li><strong>Commit SHA:</strong> <code>' + latest_tag_info.get('commit_sha', 'N/A') + '</code></li>' + '</ul>' if latest_tag_info else '<p>No valid semantic version tag found.</p>'}
