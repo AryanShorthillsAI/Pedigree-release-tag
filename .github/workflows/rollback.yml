@@ -1,31 +1,31 @@
-name: EC2 Multi-Repo Rollback
+name: EC2 Deploy / Rollback by Index
 
 on:
   workflow_dispatch:
     inputs:
       be_rollback_index:
-        description: 'Pedigree-Vision-BE: How many versions to roll back by? (Use 0 to skip)'
+        description: 'Pedigree-Vision-BE: 0=deploy latest, -1=skip, >0=rollback by N versions'
         required: true
         type: number
         default: 0
       ui_rollback_index:
-        description: 'PedigreeVisionUI: How many versions to roll back by? (Use 0 to skip)'
+        description: 'PedigreeVisionUI: 0=deploy latest, -1=skip, >0=rollback by N versions'
         required: true
         type: number
         default: 0
       models_rollback_index:
-        description: 'DigitreeModels: How many versions to roll back by? (Use 0 to skip)'
+        description: 'DigitreeModels: 0=deploy latest, -1=skip, >0=rollback by N versions'
         required: true
         type: number
         default: 0
 
 jobs:
-  trigger_multi_rollback:
-    name: Trigger Rollbacks on EC2
+  trigger_deploy_or_rollback:
+    name: Trigger Deploy/Rollback on EC2
     runs-on: ubuntu-latest
     
     steps:
-      - name: Execute Conditional Rollbacks on EC2 Server
+      - name: Execute Conditional Deploy/Rollback on EC2 Server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -33,40 +33,28 @@ jobs:
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
           script: |
-            set -e # Stop the script if any rollback command fails
+            set -e # Stop the script if any command fails
+
+            # The script logic inside the pipeline does not need to change.
+            # It just passes the user's input to the smart script on the server.
 
             # --- Process Pedigree-Vision-BE ---
             BE_INDEX=${{ github.event.inputs.be_rollback_index }}
-            if [ "$BE_INDEX" -gt 0 ]; then
-              echo "=================================================="
-              echo ">>> Triggering rollback for Pedigree-Vision-BE by $BE_INDEX version(s)..."
-              bash ~/rollback.sh 'Pedigree-Vision-BE' $BE_INDEX
-            else
-              echo "=================================================="
-              echo ">>> Skipping rollback for Pedigree-Vision-BE (index is 0)."
-            fi
+            echo "=================================================="
+            echo ">>> Processing Pedigree-Vision-BE with index: $BE_INDEX"
+            bash ~/rollback.sh 'Pedigree-Vision-BE' $BE_INDEX
 
             # --- Process PedigreeVisionUI ---
             UI_INDEX=${{ github.event.inputs.ui_rollback_index }}
-            if [ "$UI_INDEX" -gt 0 ]; then
-              echo "=================================================="
-              echo ">>> Triggering rollback for PedigreeVisionUI by $UI_INDEX version(s)..."
-              bash ~/rollback.sh 'PedigreeVisionUI' $UI_INDEX
-            else
-              echo "=================================================="
-              echo ">>> Skipping rollback for PedigreeVisionUI (index is 0)."
-            fi
+            echo "=================================================="
+            echo ">>> Processing PedigreeVisionUI with index: $UI_INDEX"
+            bash ~/rollback.sh 'PedigreeVisionUI' $UI_INDEX
 
             # --- Process DigitreeModels ---
             MODELS_INDEX=${{ github.event.inputs.models_rollback_index }}
-            if [ "$MODELS_INDEX" -gt 0 ]; then
-              echo "=================================================="
-              echo ">>> Triggering rollback for DigitreeModels by $MODELS_INDEX version(s)..."
-              bash ~/rollback.sh 'DigitreeModels' $MODELS_INDEX
-            else
-              echo "=================================================="
-              echo ">>> Skipping rollback for DigitreeModels (index is 0)."
-            fi
+            echo "=================================================="
+            echo ">>> Processing DigitreeModels with index: $MODELS_INDEX"
+            bash ~/rollback.sh 'DigitreeModels' $MODELS_INDEX
             
             echo "=================================================="
-            echo "All specified rollbacks have been processed."
+            echo "All specified operations have been processed."
