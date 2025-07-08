@@ -43,29 +43,25 @@ jobs:
         run: |
           BUCKET_NAME="myawsbucket9660551704"
 
-          # This reusable shell function will contain all the logic
-          # It takes two arguments: Repo Name and Action Index
           get_commit_hash() {
             local repo_name="$1"
             local action_index="$2"
             local commit_hash=""
 
-            # Rule 1: SKIP if index is -1
+            # Rule 1: SKIP
             if [ "$action_index" -eq -1 ]; then
-              echo "Skipping ${repo_name} as index is -1."
-              # Return an empty string
+              # FIX: Added a prefix to the echo statement
+              echo ">> INFO: Skipping ${repo_name} as index is -1."
               echo "$commit_hash"
               return
             fi
 
-            # List and sort files from S3
             local s3_path="s3://${BUCKET_NAME}/${repo_name}/"
-            echo "Listing releases for ${repo_name} from ${s3_path}..."
+            echo ">> INFO: Listing releases for ${repo_name} from ${s3_path}..."
             local sorted_files=$(aws s3 ls "$s3_path" | awk '{print $4}' | grep '\.json$' | sort -V)
 
             if [ -z "$sorted_files" ]; then
-              echo "Error: No release files found for ${repo_name}."
-              # Return empty to signify failure/skip
+              echo ">> ERROR: No release files found for ${repo_name}."
               echo "$commit_hash"
               return
             fi
@@ -73,16 +69,18 @@ jobs:
             local count=$(echo "$sorted_files" | wc -l)
             local target_filename=""
 
-            # Rule 2: DEPLOY LATEST if index is 0
+            # Rule 2: DEPLOY LATEST
             if [ "$action_index" -eq 0 ]; then
-              echo "Action for ${repo_name}: DEPLOY LATEST."
+              # FIX: Added a prefix to the echo statement
+              echo ">> INFO: Action for ${repo_name} is DEPLOY LATEST."
               target_filename=$(echo "$sorted_files" | tail -n 1)
-            # Rule 3: ROLLBACK if index is > 0
+            # Rule 3: ROLLBACK
             elif [ "$action_index" -gt 0 ]; then
-              echo "Action for ${repo_name}: ROLLBACK by ${action_index}."
+              # FIX: Added a prefix to the echo statement
+              echo ">> INFO: Action for ${repo_name} is ROLLBACK by ${action_index}."
               local target_list_index=$((count - action_index))
               if [ "$target_list_index" -le 0 ]; then
-                echo "Error: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist."
+                echo ">> ERROR: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist."
                 echo "$commit_hash"
                 return
               fi
@@ -90,31 +88,36 @@ jobs:
             fi
 
             if [ -z "$target_filename" ]; then
-                echo "Error: Could not determine target filename for ${repo_name}."
+                echo ">> ERROR: Could not determine target filename for ${repo_name}."
                 echo "$commit_hash"
                 return
             fi
             
-            echo "Target file for ${repo_name} is ${target_filename}"
-            # Download the file to the runner's temp directory
+            echo ">> INFO: Target file for ${repo_name} is ${target_filename}"
             local s3_key="${repo_name}/${target_filename}"
             aws s3 cp "s3://${BUCKET_NAME}/${s3_key}" "/tmp/${target_filename}"
             
-            # Use jq to parse the commit hash
             commit_hash=$(jq -r '.latest_release.commit_sha' "/tmp/${target_filename}")
+            # The 'echo' that returns the value must NOT have a prefix
             echo "$commit_hash"
           }
 
           # Call the function for each repo and save the result
+          echo "--- Calculating Hashes ---"
           BE_HASH=$(get_commit_hash "Pedigree-Vision-BE" ${{ github.event.inputs.be_rollback_index }})
           UI_HASH=$(get_commit_hash "PedigreeVisionUI" ${{ github.event.inputs.ui_rollback_index }})
           MODELS_HASH=$(get_commit_hash "DigitreeModels" ${{ github.event.inputs.models_rollback_index }})
+          
+          echo "--- Setting Outputs ---"
+          echo "BE Commit Hash: $BE_HASH"
+          echo "UI Commit Hash: $UI_HASH"
+          echo "Models Commit Hash: $MODELS_HASH"
 
           # Set the final hashes as outputs for the next step
           echo "be_commit_hash=$BE_HASH" >> $GITHUB_OUTPUT
           echo "ui_commit_hash=$UI_HASH" >> $GITHUB_OUTPUT
           echo "models_commit_hash=$MODELS_HASH" >> $GITHUB_OUTPUT
-
+          
       - name: Execute Commands on EC2 Server
         uses: appleboy/ssh-action@master
         with:
