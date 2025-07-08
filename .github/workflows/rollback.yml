@@ -1,50 +1,72 @@
-name: Fetch Previous Release from S3
- 
+name: EC2 Multi-Repo Rollback
+
 on:
   workflow_dispatch:
- 
+    inputs:
+      be_rollback_index:
+        description: 'Pedigree-Vision-BE: How many versions to roll back by? (Use 0 to skip)'
+        required: true
+        type: number
+        default: 0
+      ui_rollback_index:
+        description: 'PedigreeVisionUI: How many versions to roll back by? (Use 0 to skip)'
+        required: true
+        type: number
+        default: 0
+      models_rollback_index:
+        description: 'DigitreeModels: How many versions to roll back by? (Use 0 to skip)'
+        required: true
+        type: number
+        default: 0
+
 jobs:
-  fetch_release:
+  trigger_multi_rollback:
+    name: Trigger Rollbacks on EC2
     runs-on: ubuntu-latest
- 
-    env:
-      BUCKET_NAME: myawsbucket9660551704
-      AWS_REGION: ap-south-1
- 
+    
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Execute Conditional Rollbacks on EC2 Server
+        uses: appleboy/ssh-action@master
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
-          aws-region: ap-south-1
- 
-      - name: Count files and calculate previous release index
-        id: count
-        run: |
-          echo "Fetching list of release_*.txt files..."
-          OBJECTS=$(aws s3 ls s3://$BUCKET_NAME/ | grep 'release_' | awk '{print $4}')
-          COUNT=$(echo "$OBJECTS" | wc -l)
-          echo "Total release files found: $COUNT"
- 
-          if [ "$COUNT" -lt 2 ]; then
-            echo "Not enough release files to fetch release_$((COUNT-1)).txt"
-            exit 1
-          fi
- 
-          PREV_INDEX=$((COUNT - 1))
-          FILE_NAME="release_${PREV_INDEX}.txt"
-          echo "Fetching $FILE_NAME"
- 
-          echo "COUNT=$COUNT" >> $GITHUB_ENV
-          echo "PREV_FILE=$FILE_NAME" >> $GITHUB_ENV
- 
-      - name: Download file from S3
-        run: |
-          aws s3 cp s3://$BUCKET_NAME/$PREV_FILE .
- 
-      - name: Upload release file as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: previous-release-file
-          path: ${{ env.PREV_FILE }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          port: 22
+          script: |
+            set -e # Stop the script if any rollback command fails
+
+            # --- Process Pedigree-Vision-BE ---
+            BE_INDEX=${{ github.event.inputs.be_rollback_index }}
+            if [ "$BE_INDEX" -gt 0 ]; then
+              echo "=================================================="
+              echo ">>> Triggering rollback for Pedigree-Vision-BE by $BE_INDEX version(s)..."
+              bash ~/rollback.sh 'Pedigree-Vision-BE' $BE_INDEX
+            else
+              echo "=================================================="
+              echo ">>> Skipping rollback for Pedigree-Vision-BE (index is 0)."
+            fi
+
+            # --- Process PedigreeVisionUI ---
+            UI_INDEX=${{ github.event.inputs.ui_rollback_index }}
+            if [ "$UI_INDEX" -gt 0 ]; then
+              echo "=================================================="
+              echo ">>> Triggering rollback for PedigreeVisionUI by $UI_INDEX version(s)..."
+              bash ~/rollback.sh 'PedigreeVisionUI' $UI_INDEX
+            else
+              echo "=================================================="
+              echo ">>> Skipping rollback for PedigreeVisionUI (index is 0)."
+            fi
+
+            # --- Process DigitreeModels ---
+            MODELS_INDEX=${{ github.event.inputs.models_rollback_index }}
+            if [ "$MODELS_INDEX" -gt 0 ]; then
+              echo "=================================================="
+              echo ">>> Triggering rollback for DigitreeModels by $MODELS_INDEX version(s)..."
+              bash ~/rollback.sh 'DigitreeModels' $MODELS_INDEX
+            else
+              echo "=================================================="
+              echo ">>> Skipping rollback for DigitreeModels (index is 0)."
+            fi
+            
+            echo "=================================================="
+            echo "All specified rollbacks have been processed."
