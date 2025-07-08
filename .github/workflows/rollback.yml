@@ -43,6 +43,7 @@ jobs:
         run: |
           BUCKET_NAME="myawsbucket9660551704"
 
+          # This function now correctly separates its return value (stdout) from its logs (stderr).
           get_commit_hash() {
             local repo_name="$1"
             local action_index="$2"
@@ -50,19 +51,18 @@ jobs:
 
             # Rule 1: SKIP
             if [ "$action_index" -eq -1 ]; then
-              # FIX: Added a prefix to the echo statement
-              echo ">> INFO: Skipping ${repo_name} as index is -1."
-              echo "$commit_hash"
+              echo "INFO: Skipping ${repo_name} as index is -1." >&2
+              echo "$commit_hash" # Return empty string to stdout
               return
             fi
 
             local s3_path="s3://${BUCKET_NAME}/${repo_name}/"
-            echo ">> INFO: Listing releases for ${repo_name} from ${s3_path}..."
+            echo "INFO: Listing releases for ${repo_name} from ${s3_path}..." >&2
             local sorted_files=$(aws s3 ls "$s3_path" | awk '{print $4}' | grep '\.json$' | sort -V)
 
             if [ -z "$sorted_files" ]; then
-              echo ">> ERROR: No release files found for ${repo_name}."
-              echo "$commit_hash"
+              echo "ERROR: No release files found for ${repo_name}." >&2
+              echo "$commit_hash" # Return empty string to stdout
               return
             fi
 
@@ -71,38 +71,37 @@ jobs:
 
             # Rule 2: DEPLOY LATEST
             if [ "$action_index" -eq 0 ]; then
-              # FIX: Added a prefix to the echo statement
-              echo ">> INFO: Action for ${repo_name} is DEPLOY LATEST."
+              echo "INFO: Action for ${repo_name} is DEPLOY LATEST." >&2
               target_filename=$(echo "$sorted_files" | tail -n 1)
             # Rule 3: ROLLBACK
             elif [ "$action_index" -gt 0 ]; then
-              # FIX: Added a prefix to the echo statement
-              echo ">> INFO: Action for ${repo_name} is ROLLBACK by ${action_index}."
+              echo "INFO: Action for ${repo_name} is ROLLBACK by ${action_index}." >&2
               local target_list_index=$((count - action_index))
               if [ "$target_list_index" -le 0 ]; then
-                echo ">> ERROR: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist."
-                echo "$commit_hash"
+                echo "ERROR: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist." >&2
+                echo "$commit_hash" # Return empty string to stdout
                 return
               fi
               target_filename=$(echo "$sorted_files" | sed -n "${target_list_index}p")
             fi
 
             if [ -z "$target_filename" ]; then
-                echo ">> ERROR: Could not determine target filename for ${repo_name}."
-                echo "$commit_hash"
+                echo "ERROR: Could not determine target filename for ${repo_name}." >&2
+                echo "$commit_hash" # Return empty string to stdout
                 return
             fi
             
-            echo ">> INFO: Target file for ${repo_name} is ${target_filename}"
+            echo "INFO: Target file for ${repo_name} is ${target_filename}" >&2
             local s3_key="${repo_name}/${target_filename}"
-            aws s3 cp "s3://${BUCKET_NAME}/${s3_key}" "/tmp/${target_filename}"
+            aws s3 cp "s3://${BUCKET_NAME}/${s3_key}" "/tmp/${target_filename}" >&2
             
             commit_hash=$(jq -r '.latest_release.commit_sha' "/tmp/${target_filename}")
-            # The 'echo' that returns the value must NOT have a prefix
+            
+            # This is the ONLY echo that goes to stdout. This is the "return" value.
             echo "$commit_hash"
           }
 
-          # Call the function for each repo and save the result
+          # --- Main execution ---
           echo "--- Calculating Hashes ---"
           BE_HASH=$(get_commit_hash "Pedigree-Vision-BE" ${{ github.event.inputs.be_rollback_index }})
           UI_HASH=$(get_commit_hash "PedigreeVisionUI" ${{ github.event.inputs.ui_rollback_index }})
