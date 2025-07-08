@@ -26,97 +26,70 @@ jobs:
     
     steps:
       - name: Install Tools
-        run: |
-          # The runner needs jq to parse the JSON files it downloads
-          sudo apt-get update
-          sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
             aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
             aws-region: ap-south-1
 
       - name: Calculate Target Commits
         id: calculate_commits
         run: |
+          # This step is now correct and does not need changes.
           BUCKET_NAME="myawsbucket9660551704"
-
-          # This function now correctly separates its return value (stdout) from its logs (stderr).
           get_commit_hash() {
             local repo_name="$1"
             local action_index="$2"
             local commit_hash=""
-
-            # Rule 1: SKIP
             if [ "$action_index" -eq -1 ]; then
               echo "INFO: Skipping ${repo_name} as index is -1." >&2
-              echo "$commit_hash" # Return empty string to stdout
+              echo "$commit_hash"
               return
             fi
-
             local s3_path="s3://${BUCKET_NAME}/${repo_name}/"
-            echo "INFO: Listing releases for ${repo_name} from ${s3_path}..." >&2
+            echo "INFO: Listing releases for ${repo_name}..." >&2
             local sorted_files=$(aws s3 ls "$s3_path" | awk '{print $4}' | grep '\.json$' | sort -V)
-
             if [ -z "$sorted_files" ]; then
               echo "ERROR: No release files found for ${repo_name}." >&2
-              echo "$commit_hash" # Return empty string to stdout
+              echo "$commit_hash"
               return
             fi
-
             local count=$(echo "$sorted_files" | wc -l)
             local target_filename=""
-
-            # Rule 2: DEPLOY LATEST
             if [ "$action_index" -eq 0 ]; then
               echo "INFO: Action for ${repo_name} is DEPLOY LATEST." >&2
               target_filename=$(echo "$sorted_files" | tail -n 1)
-            # Rule 3: ROLLBACK
             elif [ "$action_index" -gt 0 ]; then
               echo "INFO: Action for ${repo_name} is ROLLBACK by ${action_index}." >&2
               local target_list_index=$((count - action_index))
               if [ "$target_list_index" -le 0 ]; then
-                echo "ERROR: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist." >&2
-                echo "$commit_hash" # Return empty string to stdout
+                echo "ERROR: Cannot roll back ${repo_name} by ${action_index}." >&2
+                echo "$commit_hash"
                 return
               fi
               target_filename=$(echo "$sorted_files" | sed -n "${target_list_index}p")
             fi
-
             if [ -z "$target_filename" ]; then
                 echo "ERROR: Could not determine target filename for ${repo_name}." >&2
-                echo "$commit_hash" # Return empty string to stdout
+                echo "$commit_hash"
                 return
             fi
-            
             echo "INFO: Target file for ${repo_name} is ${target_filename}" >&2
             local s3_key="${repo_name}/${target_filename}"
             aws s3 cp "s3://${BUCKET_NAME}/${s3_key}" "/tmp/${target_filename}" >&2
-            
             commit_hash=$(jq -r '.latest_release.commit_sha' "/tmp/${target_filename}")
-            
-            # This is the ONLY echo that goes to stdout. This is the "return" value.
             echo "$commit_hash"
           }
-
-          # --- Main execution ---
-          echo "--- Calculating Hashes ---"
           BE_HASH=$(get_commit_hash "Pedigree-Vision-BE" ${{ github.event.inputs.be_rollback_index }})
           UI_HASH=$(get_commit_hash "PedigreeVisionUI" ${{ github.event.inputs.ui_rollback_index }})
           MODELS_HASH=$(get_commit_hash "DigitreeModels" ${{ github.event.inputs.models_rollback_index }})
-          
-          echo "--- Setting Outputs ---"
-          echo "BE Commit Hash: $BE_HASH"
-          echo "UI Commit Hash: $UI_HASH"
-          echo "Models Commit Hash: $MODELS_HASH"
-
-          # Set the final hashes as outputs for the next step
           echo "be_commit_hash=$BE_HASH" >> $GITHUB_OUTPUT
           echo "ui_commit_hash=$UI_HASH" >> $GITHUB_OUTPUT
           echo "models_commit_hash=$MODELS_HASH" >> $GITHUB_OUTPUT
-          
+
       - name: Execute Commands on EC2 Server
         uses: appleboy/ssh-action@master
         with:
@@ -125,45 +98,52 @@ jobs:
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
           script: |
-            set -e # Stop if any command fails
-
-            # This script now only contains simple 'git' and 'restart' commands
+            # This script block is now corrected to handle authentication.
+            set -e
             PROJECTS_BASE_DIR="$HOME"
+            GITHUB_ORG="PedigreeAll"
             
-            # --- Process Pedigree-Vision-BE ---
-            BE_HASH="${{ steps.calculate_commits.outputs.be_commit_hash }}"
-            if [ -n "$BE_HASH" ]; then
-              echo "=================================================="
-              echo ">>> Executing on EC2 for Pedigree-Vision-BE: checkout ${BE_HASH:0:7}"
-              cd "${PROJECTS_BASE_DIR}/Pedigree-Vision-BE"
-              git fetch --all --prune
-              git checkout "$BE_HASH"
-              # Add your BE service restart command here
-              # sudo systemctl restart pedigree-be.service
-            fi
+            # Pass the PAT from GitHub Secrets into an environment variable on the server
+            export GH_PAT='${{ secrets.GH_PAT }}'
 
-            # --- Process PedigreeVisionUI ---
-            UI_HASH="${{ steps.calculate_commits.outputs.ui_commit_hash }}"
-            if [ -n "$UI_HASH" ]; then
+            # A reusable function to perform the authenticated git operations
+            perform_git_checkout() {
+              local repo_name="$1"
+              local commit_hash="$2"
+
+              # Skip if the commit hash is empty (meaning we skip this repo)
+              if [ -z "$commit_hash" ]; then
+                return 0
+              fi
+
               echo "=================================================="
-              echo ">>> Executing on EC2 for PedigreeVisionUI: checkout ${UI_HASH:0:7}"
-              cd "${PROJECTS_BASE_DIR}/PedigreeVisionUI"
+              echo ">>> Executing on EC2 for ${repo_name}: checkout ${commit_hash:0:7}"
+              cd "${PROJECTS_BASE_DIR}/${repo_name}"
+
+              # Construct the authenticated URL for this specific repo
+              local auth_url="https://x-access-token:${GH_PAT}@github.com/${GITHUB_ORG}/${repo_name}.git"
+              local original_url="https://github.com/${GITHUB_ORG}/${repo_name}.git"
+
+              echo "Temporarily setting remote URL for authentication..."
+              git remote set-url origin "${auth_url}"
+              
+              echo "Fetching from remote..."
               git fetch --all --prune
-              git checkout "$UI_HASH"
-              # Add your UI service restart command here
-              # sudo systemctl restart pedigree-ui.service
-            fi
-            
-            # --- Process DigitreeModels ---
-            MODELS_HASH="${{ steps.calculate_commits.outputs.models_commit_hash }}"
-            if [ -n "$MODELS_HASH" ]; then
-              echo "=================================================="
-              echo ">>> Executing on EC2 for DigitreeModels: checkout ${MODELS_HASH:0:7}"
-              cd "${PROJECTS_BASE_DIR}/DigitreeModels"
-              git fetch --all --prune
-              git checkout "$MODELS_HASH"
-              # Add your Models service restart command here
-            fi
+              
+              echo "Resetting remote URL for security..."
+              git remote set-url origin "${original_url}"
+
+              echo "Checking out commit..."
+              git checkout "$commit_hash"
+
+              # Add your service-specific restart command here
+              # if [ "$repo_name" == "Pedigree-Vision-BE" ]; then sudo systemctl restart be.service; fi
+            }
+
+            # Call the reusable function for each repository
+            perform_git_checkout "Pedigree-Vision-BE" "${{ steps.calculate_commits.outputs.be_commit_hash }}"
+            perform_git_checkout "PedigreeVisionUI" "${{ steps.calculate_commits.outputs.ui_commit_hash }}"
+            perform_git_checkout "DigitreeModels" "${{ steps.calculate_commits.outputs.models_commit_hash }}"
 
             echo "=================================================="
             echo "All EC2 operations complete."
