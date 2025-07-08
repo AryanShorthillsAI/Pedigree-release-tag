@@ -1,4 +1,4 @@
-name: EC2 Deploy / Rollback by Index
+name: EC2 Deploy or Rollback (Pipeline-Driven)
 
 on:
   workflow_dispatch:
@@ -20,12 +20,102 @@ on:
         default: 0
 
 jobs:
-  trigger_deploy_or_rollback:
-    name: Trigger Deploy/Rollback on EC2
+  calculate_and_execute_rollback:
+    name: Calculate Target Commits and Execute on EC2
     runs-on: ubuntu-latest
     
     steps:
-      - name: Execute Conditional Deploy/Rollback on EC2 Server
+      - name: Install Tools
+        run: |
+          # The runner needs jq to parse the JSON files it downloads
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+            aws-region: ap-south-1
+
+      - name: Calculate Target Commits
+        id: calculate_commits
+        run: |
+          BUCKET_NAME="myawsbucket9660551704"
+
+          # This reusable shell function will contain all the logic
+          # It takes two arguments: Repo Name and Action Index
+          get_commit_hash() {
+            local repo_name="$1"
+            local action_index="$2"
+            local commit_hash=""
+
+            # Rule 1: SKIP if index is -1
+            if [ "$action_index" -eq -1 ]; then
+              echo "Skipping ${repo_name} as index is -1."
+              # Return an empty string
+              echo "$commit_hash"
+              return
+            fi
+
+            # List and sort files from S3
+            local s3_path="s3://${BUCKET_NAME}/${repo_name}/"
+            echo "Listing releases for ${repo_name} from ${s3_path}..."
+            local sorted_files=$(aws s3 ls "$s3_path" | awk '{print $4}' | grep '\.json$' | sort -V)
+
+            if [ -z "$sorted_files" ]; then
+              echo "Error: No release files found for ${repo_name}."
+              # Return empty to signify failure/skip
+              echo "$commit_hash"
+              return
+            fi
+
+            local count=$(echo "$sorted_files" | wc -l)
+            local target_filename=""
+
+            # Rule 2: DEPLOY LATEST if index is 0
+            if [ "$action_index" -eq 0 ]; then
+              echo "Action for ${repo_name}: DEPLOY LATEST."
+              target_filename=$(echo "$sorted_files" | tail -n 1)
+            # Rule 3: ROLLBACK if index is > 0
+            elif [ "$action_index" -gt 0 ]; then
+              echo "Action for ${repo_name}: ROLLBACK by ${action_index}."
+              local target_list_index=$((count - action_index))
+              if [ "$target_list_index" -le 0 ]; then
+                echo "Error: Cannot roll back ${repo_name} by ${action_index}. Only ${count} releases exist."
+                echo "$commit_hash"
+                return
+              fi
+              target_filename=$(echo "$sorted_files" | sed -n "${target_list_index}p")
+            fi
+
+            if [ -z "$target_filename" ]; then
+                echo "Error: Could not determine target filename for ${repo_name}."
+                echo "$commit_hash"
+                return
+            fi
+            
+            echo "Target file for ${repo_name} is ${target_filename}"
+            # Download the file to the runner's temp directory
+            local s3_key="${repo_name}/${target_filename}"
+            aws s3 cp "s3://${BUCKET_NAME}/${s3_key}" "/tmp/${target_filename}"
+            
+            # Use jq to parse the commit hash
+            commit_hash=$(jq -r '.latest_release.commit_sha' "/tmp/${target_filename}")
+            echo "$commit_hash"
+          }
+
+          # Call the function for each repo and save the result
+          BE_HASH=$(get_commit_hash "Pedigree-Vision-BE" ${{ github.event.inputs.be_rollback_index }})
+          UI_HASH=$(get_commit_hash "PedigreeVisionUI" ${{ github.event.inputs.ui_rollback_index }})
+          MODELS_HASH=$(get_commit_hash "DigitreeModels" ${{ github.event.inputs.models_rollback_index }})
+
+          # Set the final hashes as outputs for the next step
+          echo "be_commit_hash=$BE_HASH" >> $GITHUB_OUTPUT
+          echo "ui_commit_hash=$UI_HASH" >> $GITHUB_OUTPUT
+          echo "models_commit_hash=$MODELS_HASH" >> $GITHUB_OUTPUT
+
+      - name: Execute Commands on EC2 Server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -33,28 +123,45 @@ jobs:
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
           script: |
-            set -e # Stop the script if any command fails
+            set -e # Stop if any command fails
 
-            # The script logic inside the pipeline does not need to change.
-            # It just passes the user's input to the smart script on the server.
-
+            # This script now only contains simple 'git' and 'restart' commands
+            PROJECTS_BASE_DIR="$HOME"
+            
             # --- Process Pedigree-Vision-BE ---
-            BE_INDEX=${{ github.event.inputs.be_rollback_index }}
-            echo "=================================================="
-            echo ">>> Processing Pedigree-Vision-BE with index: $BE_INDEX"
-            bash ~/rollback.sh 'Pedigree-Vision-BE' $BE_INDEX
+            BE_HASH="${{ steps.calculate_commits.outputs.be_commit_hash }}"
+            if [ -n "$BE_HASH" ]; then
+              echo "=================================================="
+              echo ">>> Executing on EC2 for Pedigree-Vision-BE: checkout ${BE_HASH:0:7}"
+              cd "${PROJECTS_BASE_DIR}/Pedigree-Vision-BE"
+              git fetch --all --prune
+              git checkout "$BE_HASH"
+              # Add your BE service restart command here
+              # sudo systemctl restart pedigree-be.service
+            fi
 
             # --- Process PedigreeVisionUI ---
-            UI_INDEX=${{ github.event.inputs.ui_rollback_index }}
-            echo "=================================================="
-            echo ">>> Processing PedigreeVisionUI with index: $UI_INDEX"
-            bash ~/rollback.sh 'PedigreeVisionUI' $UI_INDEX
-
-            # --- Process DigitreeModels ---
-            MODELS_INDEX=${{ github.event.inputs.models_rollback_index }}
-            echo "=================================================="
-            echo ">>> Processing DigitreeModels with index: $MODELS_INDEX"
-            bash ~/rollback.sh 'DigitreeModels' $MODELS_INDEX
+            UI_HASH="${{ steps.calculate_commits.outputs.ui_commit_hash }}"
+            if [ -n "$UI_HASH" ]; then
+              echo "=================================================="
+              echo ">>> Executing on EC2 for PedigreeVisionUI: checkout ${UI_HASH:0:7}"
+              cd "${PROJECTS_BASE_DIR}/PedigreeVisionUI"
+              git fetch --all --prune
+              git checkout "$UI_HASH"
+              # Add your UI service restart command here
+              # sudo systemctl restart pedigree-ui.service
+            fi
             
+            # --- Process DigitreeModels ---
+            MODELS_HASH="${{ steps.calculate_commits.outputs.models_commit_hash }}"
+            if [ -n "$MODELS_HASH" ]; then
+              echo "=================================================="
+              echo ">>> Executing on EC2 for DigitreeModels: checkout ${MODELS_HASH:0:7}"
+              cd "${PROJECTS_BASE_DIR}/DigitreeModels"
+              git fetch --all --prune
+              git checkout "$MODELS_HASH"
+              # Add your Models service restart command here
+            fi
+
             echo "=================================================="
-            echo "All specified operations have been processed."
+            echo "All EC2 operations complete."
