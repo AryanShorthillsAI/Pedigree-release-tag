@@ -58,8 +58,8 @@ jobs:
               aws s3 cp "$local_json_file" "s3://${BUCKET_NAME}/${s3_key_path}"
               echo "✅ Uploaded ${file_name}"
               
-              aws s3 cp "$local_html_file" "s3://${BUCKET_NAME}/${repo_name}/${html_file_name}"
-              echo "✅ Uploaded ${html_file_name}"
+              # aws s3 cp "$local_html_file" "s3://${BUCKET_NAME}/${repo_name}/${html_file_name}"
+              # echo "✅ Uploaded ${html_file_name}"
             else
               echo "This release version is already present in S3. No action needed."
             fi
