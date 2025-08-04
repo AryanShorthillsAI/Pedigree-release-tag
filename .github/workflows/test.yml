@@ -7,12 +7,7 @@ jobs:
   ssh:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Install sshpass
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y sshpass
-
+    steps:  # <- You missed this "steps" key
       - name: Execute Commands on EC2 Server
         uses: appleboy/ssh-action@master
         with:
@@ -21,19 +16,17 @@ jobs:
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
           script: |
-              echo "Connecting to EC2 instance at $HOST"
-              echo "==== HOSTNAME ===="
-              hostname
-              echo
-              echo "==== IP ADDRESSES ===="
-              ip addr show
-              echo
-              echo "==== META-DATA ===="
-              curl -s http://169.254.169.254/latest/meta-data/
-              echo
-              echo "==== INSTANCE ID ===="
-              curl -s http://169.254.169.254/latest/meta-data/instance-id
-              echo
-              echo "==== IAM ROLE ===="
-              curl -s http://169.254.169.254/latest/meta-data/iam/info
-              EOF
+            echo "==== HOSTNAME ===="
+            hostname
+
+            echo "==== IP ADDRESSES ===="
+            ip addr show
+
+            echo "==== META-DATA FIELDS ===="
+            curl -s http://169.254.169.254/latest/meta-data/
+
+            echo "==== INSTANCE ID ===="
+            curl -s http://169.254.169.254/latest/meta-data/instance-id
+
+            echo "==== IAM ROLE ===="
+            curl -s http://169.254.169.254/latest/meta-data/iam/info
