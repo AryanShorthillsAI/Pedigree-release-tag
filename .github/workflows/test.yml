@@ -7,8 +7,13 @@ jobs:
   ssh:
     runs-on: ubuntu-latest
 
-    steps:  # <- You missed this "steps" key
-      - name: Execute Commands on EC2 Server
+    steps:
+      - name: Update server
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y sshpass
+
+      - name: Execute Commands on EC2 Server and Fetch IPs
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -16,17 +21,18 @@ jobs:
           password: ${{ secrets.EC2_PASSWORD }}
           port: 22
           script: |
-            echo "==== HOSTNAME ===="
-            hostname
+            echo "Fetching public and private IPs..."
+            PUBLIC_IP=$(curl -s ifconfig.me)
+            PRIVATE_IP=$(hostname -I | awk '{print $1}')
+            echo "PUBLIC_IP=$PUBLIC_IP" > ~/GitHub.env
+            echo "PRIVATE_IP=$PRIVATE_IP" >> ~/GitHub.env
+            cat ~/GitHub.env
 
-            echo "==== IP ADDRESSES ===="
-            ip addr show
+      - name: Copy GitHub.env from EC2 to Runner
+        run: |
+          sshpass -p "${{ secrets.EC2_PASSWORD }}" scp -o StrictHostKeyChecking=no -P 22 ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/GitHub.env GitHub.env
 
-            echo "==== META-DATA FIELDS ===="
-            curl -s http://169.254.169.254/latest/meta-data/
-
-            echo "==== INSTANCE ID ===="
-            curl -s http://169.254.169.254/latest/meta-data/instance-id
-
-            echo "==== IAM ROLE ===="
-            curl -s http://169.254.169.254/latest/meta-data/iam/info
+      - name: Echo contents of GitHub.env
+        run: |
+          echo "Contents of GitHub.env:"
+          cat GitHub.env
