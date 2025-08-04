@@ -12,6 +12,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y sshpass
+          ping -c 5 ${{ secrets.EC2_HOST }}
 
       - name: Execute Commands on EC2 Server and Fetch IPs
         uses: appleboy/ssh-action@master
