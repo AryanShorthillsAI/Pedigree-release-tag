@@ -1,0 +1,39 @@
+name: SSH into EC2 and gather identity
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ssh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: SSH and collect info
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER }}
+          PASSWORD: ${{ secrets.EC2_PASSWORD }}
+        run: |
+          echo "Connecting to EC2 instance at $HOST"
+
+          sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no "$USER@$HOST" << 'EOF'
+            echo "==== HOSTNAME ===="
+            hostname
+            echo
+            echo "==== IP ADDRESSES ===="
+            ip addr show
+            echo
+            echo "==== META-DATA ===="
+            curl -s http://169.254.169.254/latest/meta-data/
+            echo
+            echo "==== INSTANCE ID ===="
+            curl -s http://169.254.169.254/latest/meta-data/instance-id
+            echo
+            echo "==== IAM ROLE ===="
+            curl -s http://169.254.169.254/latest/meta-data/iam/info
+          EOF
